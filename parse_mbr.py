@@ -9,6 +9,7 @@ http://en.wikipedia.org/wiki/Master_boot_record
 '''
 import getopt, sys
 import struct
+from wsgiref.validate import check_status
 
 def usage():
     print '''Usage:
@@ -20,62 +21,77 @@ def usage():
     E.g.: python parse_mbr.py -i mbr 
     '''
 
-# All multi-byte fields in a 16-byte partition record are little-endian
+# All multi-byte fields in a 16-byte partition record are little-endian!
 # Use '<' when unpacking structs below
  
-# Read an unsigned byte from current position in f
-def read_ub(f):
-    return struct.unpack('B', f.read(1))[0]
+# Read an unsigned byte from data block
+def read_ub(data):
+    return struct.unpack('B', data[0])[0]
+  
+# Read an unsigned short int (2 bytes) from data block    
+def read_us(data):
+    return struct.unpack('<H', data[0:2])[0]
 
-# Read a signed int (4 bytes) from current position in  f    
-def read_ui(f):
-    return struct.unpack('<I', f.read(4))[0]
-    
-# Read a short int (2 bytes) from current position in  f    
-def read_s(f):
-    return struct.unpack('<h', f.read(2))[0]
+# Read an unsigned int (4 bytes) from data block    
+def read_ui(data):
+    return struct.unpack('<I', data[0:4])[0]
 
-def is_mbr():
-    # Check MBR signature. Must be 0x55AA
-    f.seek(510)
-    mbr_sig = read_s(f)
-    print "Read MBR signature: 0x%04X" % (mbr_sig)
-    if (mbr_sig == 0x55AA):
-        print "Correct MBR signature"
-    else:
-        print "Incorrect MBR signature"
+class PartitionEntry:
+    def __init__(self, data):
+        self.Status = read_ub(data)
+        self.StartHead = read_ub(data[1])
+        tmp = read_ub(data[2])
+        self.StartSector = tmp & 0x3F
+        self.StartCylinder = (((tmp & 0xC0)>>6)<<8) + read_ub(data[3])
+        self.PartType = read_ub(data[4])
+        self.EndHead = read_ub(data[5])
+        tmp = read_ub(data[6])
+        self.EndSector = tmp & 0x3F
+        self.EndCylinder = (((tmp & 0xC0)>>6)<<8) + read_ub(data[7])
+        self.LBA = read_ui(data[8:12])
+        self.NumSectors = read_ui(data[12:16])    
+    
+    def print_partition(self):
+        self.check_status()
+        print "CHS of first sector: %d %d %d" % \
+            (self.StartCylinder, self.StartHead, self.StartSector)
+        print "Part type: 0x%02X" % self.PartType
+        print "CHS of last sector: %d %d %d" % \
+            (self.EndCylinder, self.EndHead, self.EndSector)
+        print "LBA of first absolute sector: %d" % (self.LBA)
+        print "Number of sectors in partition: %d" % (self.NumSectors)
+                
+    def check_status(self):
+        if (self.Status == 0x00):
+            print 'Non bootable'
+        else:
+            if (self.Status == 0x80):
+                print 'Bootable'
+            else: 
+                print 'Invalid bootable byte'
+        
+# Table of four primary partitions        
+class PartitionTable:
+    def __init__(self, data):
+        self.Partitions =[PartitionEntry(data[16*i:16*(i+1)]) for i in range (0, 4)]
 
-def parse_part_entry():
-    bootable = read_ub(f)
-    if (bootable == 0x00):
-        print '  Non bootable'
-    else:
-        if (bootable == 0x80):
-            print '  Bootable'
-        else: 
-            print '  Invalid bootable byte'
-    
-    start_head = read_ub(f)
-    tmp = read_ub(f)
-    start_sector = tmp & 0x3F
-    start_cylinder = (((tmp & 0xC0)>>6)<<8) + read_ub(f)
-    #print "  CHS of first sector: %d %d %d" % (start_cylinder, start_head, start_sector)
-    part_type = read_ub(f)
-    
-    print "  Partition type: 0x%02X" % (part_type)
-    
-    end_head = read_ub(f)
-    tmp = read_ub(f)
-    end_sector = tmp & 0x3F
-    end_cylinder = (((tmp & 0xC0)>>6)<<8) + read_ub(f)
-    #print "  CHS of last sector: %d %d %d" % (end_cylinder, end_head, end_sector)
-    
-    lba = read_ui(f)
-    print "  LBA of first absolute sector: %d" % (lba)    
-    
-    num_sectors = read_ui(f)    
-    print "  Number of sectors in partition: %d" % (num_sectors)
-                    
+# Master Boot Record        
+class MBR:
+    def __init__(self, data):
+        self.BootCode = data[:440]
+        self.DiskSig = data[441:444]
+        self.Unused = data[444:446]        
+        self.PartitionTable = PartitionTable(data[446:510])        
+        self.MBRSig = data[510:512]
+        
+    def check_mbr_sig(self):
+        mbr_sig = read_us(self.MBRSig)
+        print "Read MBR signature: 0x%04X" % (mbr_sig)
+        if (mbr_sig == 0xAA55):
+            print "Correct MBR signature"
+        else:
+            print "Incorrect MBR signature"        
+                      
 if __name__=="__main__":
     try:
         opts, args = getopt.getopt(sys.argv[1:], "i:h", ["help", "input="])
@@ -100,11 +116,14 @@ if __name__=="__main__":
         sys.exit()
         
     f = open(input, 'rb')
+    data = f.read()
+    print "Read: %d bytes" % (len(data))
     
-    is_mbr()
+    master_br = MBR(data)    
+    master_br.check_mbr_sig()
     
-    for i in range(0,4):
-        print "Partition %d" % (i+1)
-        f.seek(446 + i * 16)
-        parse_part_entry()
-        
+    for partition in master_br.PartitionTable.Partitions:
+        print ""
+        partition.print_partition()    
+    
+    f.close()
