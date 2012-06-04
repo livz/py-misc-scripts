@@ -13,7 +13,7 @@ from wsgiref.validate import check_status
 
 def usage():
     print '''Usage:
-    python parse_mbr.py [-param=value]
+    python parse_mbr.py [--param=value]
     Params:
     -h, --help                      print this
     -i file, --input=file           set input file    
