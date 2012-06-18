@@ -78,8 +78,8 @@ class PartitionTable:
 # Master Boot Record        
 class MBR:
     def __init__(self, data):
-        self.BootCode = data[:440]
-        self.DiskSig = data[441:444]
+        self.BootCode = data[:440]        
+        self.DiskSig = read_ui(data[440:444])
         self.Unused = data[444:446]        
         self.PartitionTable = PartitionTable(data[446:510])        
         self.MBRSig = data[510:512]
@@ -90,7 +90,10 @@ class MBR:
         if (mbr_sig == 0xAA55):
             print "Correct MBR signature"
         else:
-            print "Incorrect MBR signature"        
+            print "Incorrect MBR signature"
+            
+    def get_disk_sig(self):        
+        return self.DiskSig      
                       
 if __name__=="__main__":
     try:
@@ -121,6 +124,8 @@ if __name__=="__main__":
     
     master_br = MBR(data)    
     master_br.check_mbr_sig()
+    
+    print "Disk signature: 0x%08X" % (master_br.get_disk_sig())
     
     for partition in master_br.PartitionTable.Partitions:
         print ""
