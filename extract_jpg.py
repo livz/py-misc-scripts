@@ -1,3 +1,6 @@
+# Extract JPEG objects from processes memory dumps
+# (e.g. obtained with memdump command from volatility)
+
 import sys
 import mmap
 
